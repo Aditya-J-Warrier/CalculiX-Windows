@@ -62,7 +62,7 @@
      &     nea,neb,kscale,iponoeln(*),inoeln(2,*),network,ndof,
      &     nset,islavquadel(*),jqt(*),irowt(*),ii,jqte(21),
      &     irowte(96),i1,j1,j2,konl(26),mortartrafoflag,ikmpc(*),
-     &     mscalmethod,kk,imat,istiff,length
+     &     mscalmethod,kk,imat,istiff,length,fulldof1,fulldof2
 !     
       real*8 co(3,*),xboun(*),coefmpc(*),xforc(*),xload(2,*),p1(3),
      &     p2(3),ad(*),au(*),bodyf(3),fext(*),xloadold(2,*),reltime,
@@ -91,7 +91,7 @@
       icalccg=0
 
       if (firstcall) then
-         open(unitK,file='Kglobal.dat',status='unknown')
+         open(unitK,file='Kglobal_unreduced.dat',status='unknown')
          firstcall = .false.
       endif
 
@@ -374,29 +374,39 @@ c              write(*,*) 'mafillsm ',node1,k,node2,m,jj,ll
             cycle
           endif
 !     
+
           do jj=1,ndof*nope
-!     
+
             j=(jj-1)/ndof+1
             k=jj-ndof*(j-1)
-!     
+
             node1=kon(indexe+j)
             jdof1=nactdof(k,node1)
-!     
+
             do ll=jj,ndof*nope
-!     
+
               l=(ll-1)/ndof+1
               m=ll-ndof*(l-1)
-!     
+
               node2=kon(indexe+l)
               jdof2=nactdof(m,node2)
-c              if(i.eq.96) then
-c                write(20,100) node1,k,node2,m,s(jj,ll)
-c                write(21,100) node1,k,node2,m,sm(jj,ll)
-c              endif
-c 100          format(i10,",",i5,",",i10,",",i5,",",e20.13)
-!     
-!     check whether one of the DOF belongs to a SPC or MPC
-!     
+
+c --- your full DOF mapping (unconstrained numbering) ---
+              fulldof1 = (node1-1)*ndof + k
+              fulldof2 = (node2-1)*ndof + m
+
+c --- always export raw, unconstrained K (symmetric storage) ---
+              if (fulldof1 .le. fulldof2) then
+                write(unitK,'(2I10,1X,E20.12)') fulldof1, fulldof2,
+     &                                         s(jj,ll)
+              else
+                write(unitK,'(2I10,1X,E20.12)') fulldof2, fulldof1,
+     &                                         s(jj,ll)
+              endif
+
+c --- original ccx logic for reduced matrix (unchanged) ---
+c     check whether one of the DOF belongs to a SPC or MPC
+
               if((jdof1.gt.0).and.(jdof2.gt.0)) then
                 if(stiffonly(1).eq.1) then
                   call add_sm_st(au,ad,jq,irow,jdof1,jdof2,
@@ -405,20 +415,12 @@ c 100          format(i10,",",i5,",",i10,",",i5,",",e20.13)
                   call add_sm_ei(au,ad,aub,adb,jq,irow,jdof1,jdof2,
      &                 s(jj,ll),sm(jj,ll),jj,ll)
                 endif
-  
-c     Export global stiffness entry (symmetric storage: jdof1<=jdof2)
-                if (jdof1.le.jdof2) then
-                  write(unitK,'(2I10,1X,E20.12)') jdof1, jdof2, s(jj,ll)
-                else
-                  write(unitK,'(2I10,1X,E20.12)') jdof2, jdof1, s(jj,ll)
-                endif
-
 
               elseif((jdof1.gt.0).or.(jdof2.gt.0)) then
-!     
-!     idof1: genuine DOF
-!     idof2: nominal DOF of the SPC/MPC
-!     
+
+c     idof1: genuine DOF
+c     idof2: nominal DOF of the SPC/MPC
+
                 if(jdof1.le.0) then
                   idof1=jdof2
                   idof2=jdof1
@@ -428,9 +430,9 @@ c     Export global stiffness entry (symmetric storage: jdof1<=jdof2)
                 endif
                 if(nmpc.gt.0) then
                   if(idof2.ne.2*(idof2/2)) then
-!     
-!     regular DOF / MPC
-!     
+
+c     regular DOF / MPC
+
                     id=(-idof2+1)/2
                     ist=ipompc(id)
                     index=nodempc(3,ist)
@@ -446,9 +448,9 @@ c     Export global stiffness entry (symmetric storage: jdof1<=jdof2)
                         else
                           valu2=-coefmpc(index)*sm(jj,ll)/
      &                         coefmpc(ist)
-!     
+
                           if(idof1.eq.idof2) valu2=2.d0*valu2
-!     
+
                           call add_sm_ei(au,ad,aub,adb,jq,irow,
      &                         idof1,idof2,value,valu2,i0,i0)
                         endif
@@ -464,9 +466,9 @@ c     Export global stiffness entry (symmetric storage: jdof1<=jdof2)
                     cycle
                   endif
                 endif
-!     
-!     regular DOF / SPC
-!     
+
+c     regular DOF / SPC
+
                 if(rhsi.eq.1) then
                 elseif(nmethod.eq.2) then
                   value=s(jj,ll)
@@ -486,9 +488,9 @@ c     Export global stiffness entry (symmetric storage: jdof1<=jdof2)
                   id1=(-idof1+1)/2
                   id2=(-idof2+1)/2
                   if(id1.eq.id2) then
-!     
-!     MPC id1 / MPC id1
-!     
+
+c     MPC id1 / MPC id1
+
                     ist=ipompc(id1)
                     index1=nodempc(3,ist)
                     if(index1.eq.0) cycle
@@ -526,7 +528,7 @@ c     Export global stiffness entry (symmetric storage: jdof1<=jdof2)
      &                           value)
                           endif
                         endif
-!     
+
                         index2=nodempc(3,index2)
                         if(index2.eq.0) exit
                       enddo
@@ -534,9 +536,9 @@ c     Export global stiffness entry (symmetric storage: jdof1<=jdof2)
                       if(index1.eq.0) exit
                     enddo
                   else
-!     
-!     MPC id1 / MPC id2
-!     
+
+c     MPC id1 / MPC id2
+
                     ist1=ipompc(id1)
                     index1=nodempc(3,ist1)
                     if(index1.eq.0) cycle
@@ -566,9 +568,9 @@ c     Export global stiffness entry (symmetric storage: jdof1<=jdof2)
                           else
                             valu2=coefmpc(index1)*coefmpc(index2)*
      &                           sm(jj,ll)/coefmpc(ist1)/coefmpc(ist2)
-!     
+
                             if(idof1.eq.idof2) valu2=2.d0*valu2
-!     
+
                             call add_sm_ei(au,ad,aub,adb,jq,
      &                           irow,idof1,idof2,value,valu2,i0,i0)
                           endif
@@ -587,7 +589,7 @@ c     Export global stiffness entry (symmetric storage: jdof1<=jdof2)
      &                           value)
                           endif
                         endif
-!     
+
                         index2=nodempc(3,index2)
                         if(index2.eq.0) exit
                       enddo
@@ -598,6 +600,8 @@ c     Export global stiffness entry (symmetric storage: jdof1<=jdof2)
                 endif
               endif
             enddo
+
+c --- original continuation with rhsi / distributed forces comes next ---
 !     
             if(rhsi.eq.1) then
 !     
