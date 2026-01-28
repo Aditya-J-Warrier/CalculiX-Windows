@@ -1,0 +1,105 @@
+## Purpose
+
+This folder contains a slightly modified build of **CalculiX ccx 2.23** for Ubuntu/WSL with additional functionality to **export the assembled global stiffness matrix** \(K\) for post‑processing (eigenanalysis, comparison with analytical models, etc.).
+
+Main changes:
+
+- `mafillsm.f`: writes the global stiffness matrix to `Kglobal.dat` during assembly.
+- Minor build adjustments for Ubuntu/WSL (LAPACK/BLAS linking, disabled unused features).
+- All modifications are kept minimal so standard CalculiX workflows still work.
+
+---
+
+## Build on Ubuntu / WSL
+
+Dependencies (Ubuntu):
+
+```bash
+sudo apt update
+sudo apt install build-essential gfortran liblapack-dev libblas-dev
+```
+
+Build:
+
+```bash
+cd ccx_ubuntu/CalculiX/ccx_2.23/src
+make
+```
+
+This produces the executable:
+
+```text
+ccx_ubuntu/CalculiX/ccx_2.23/src/ccx_2.23
+```
+
+***
+
+## Running and exporting the stiffness matrix
+
+From a folder containing a standard CalculiX input file `jobname.inp`:
+
+```bash
+/path/to/ccx_ubuntu/CalculiX/ccx_2.23/src/ccx_2.23 jobname
+```
+
+In addition to the normal `.frd` / `.dat` files, this build writes
+
+```text
+Kglobal.dat
+```
+
+in the **job folder**.
+
+### `Kglobal.dat` format
+
+`Kglobal.dat` is a sparse triplet representation of the assembled global stiffness matrix:
+
+```text
+i  j  value
+```
+
+- `i` – global row index (scalar DOF number, 1‑based).
+- `j` – global column index (scalar DOF number, 1‑based).
+- `value` – stiffness entry \(K_{ij}\) (force at DOF `i` per unit displacement at DOF `j`).
+
+Notes:
+
+- Indices are **DOFs**, not node numbers. Each node typically has 3 (solid) or 6 (shell/beam) DOFs, mapped internally by ccx.
+- The matrix is symmetric for standard linear static problems, so entries with `(i,j)` and `(j,i)` may both appear.
+- Only nonzero entries are written.
+
+***
+
+## Reconstructing K in Python
+
+Example using SciPy to rebuild \(K\) as a sparse matrix and compute its lowest eigenvalues:
+
+```python
+import numpy as np
+from scipy.sparse import coo_matrix
+from scipy.sparse.linalg import eigsh
+
+# Load triplets from Kglobal.dat (no header lines)
+data = np.loadtxt("Kglobal.dat")
+
+i = data[:, 0].astype(int) - 1  # convert 1-based → 0-based
+j = data[:, 1].astype(int) - 1
+v = data[:, 2]
+
+ndof = int(max(i.max(), j.max()) + 1)
+K = coo_matrix((v, (i, j)), shape=(ndof, ndof)).tocsr()
+
+# Check symmetry (optional)
+sym_err = (K - K.T).nnz
+print("Nonzero entries in K - K^T:", sym_err)
+
+# Smallest 5 eigenvalues (for positive-definite K)
+vals, vecs = eigsh(K, k=5, which="SM")
+print("Eigenvalues:", vals)
+```
+
+This script can be later used to:
+
+- Compare eigenvalues for different geometries (e.g. varying beam height).
+- Compare ccx results to analytical beam stiffness/eigenvalues.
+- Visualize K’s sparsity pattern or eigenvectors.
