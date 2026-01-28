@@ -20,3 +20,7 @@ pycache/
 
 .ipynb_checkpoints/
 
+CalculiX/ccx_2.23/src/.c
+CalculiX/ccx_2.23/src/.f
+CalculiX/ccx_2.23/src/*.h
+!CalculiX/ccx_2.23/src/spooles.c
